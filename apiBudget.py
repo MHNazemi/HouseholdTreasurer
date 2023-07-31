@@ -6,6 +6,7 @@ import logging
 from copy import copy
 import datetime
 import redis
+import pickle
 
 ACCOUNT_QUESTION=-1
 ACCOUNT_NAME=0
@@ -37,9 +38,23 @@ class Cost:
     def __str__(self) -> str:
         return f"{self.date}: ${self.value} - {self.text} by {self.owner}"
 
-class Household:
-    def __init__(self,name) -> None:
+
+class Household_redis_adapter:
+    server = redis.Redis("localhost",6379,0)
+    
+    def update(self):
+        self.server.set(self.key,pickle.dumps(self))
+
+    def __getitem__(self,key) :
+        return pickle.loads( self.server.get("key"))
+    
+    def delete (self):
+        self.server.delete(self.key)
+    
+class Household(Household_redis_adapter):
+    def __init__(self,key,name) -> None:
         self.name=name
+        self.key = key
         self.budget = {}
 
         self.balance = {}
@@ -48,6 +63,7 @@ class Household:
         self.sheet = []
         self.prev_sheets = []
 
+        super().__init__()
 
     def get_balance_str(self):
         resp="Your household current balance is:\n\n"
@@ -69,6 +85,7 @@ class Household:
         if name not in self.budget:
             self.budget[name]= int(cap)
             self.balance[name] = int(cap)
+            self.update()
             return True, "budget is added"
         else:
             return False,"budget already exist"
@@ -79,15 +96,18 @@ class Household:
         else:
             del self.budget[name]
             del self.balance[name]
+            self.update()
             return True,"budget got deleted successfully"
 
     def reset_budget(self):
         self.balance = copy(self.budget)
+        self.update()
 
     def add_cost(self,name,cost:int,user=None,date=None,text=None):
         if name in self.budget:
             self.sheet.append( Cost(cost,name,text,date,user))
             self.balance[name]-=cost
+            self.update()
             return True, "cost is registred"
         else:
             return False, "budget does not exist"
@@ -98,6 +118,7 @@ class Household:
     def finish_cycle(self):
         self.balance_prev.append((datetime.datetime.now(),copy(self.balance)))
         self.balance = copy(self.budget)
+        self.update()
 
     def get_costs(self,page=0):
         resp = []
@@ -112,21 +133,13 @@ class Household:
             cost:Cost = self.sheet[i]
             self.balance[cost.category] += cost.value # revet back the cost 
             del self.sheet[i]
+            self.update()
             return True
         except:
             return False
-
-
-class Household_redis_adapter:
-    def __init__(self) -> None:
-        self.server  = redis.Redis("localhost",6379,0)
     
-    def __setitem__(self, key:str, value:Household):
-        print (key)
 
-    def __getitem__(self,key):
-        pass
-    
+
 
 s= Household_redis_adapter()
 s[0] = 12
