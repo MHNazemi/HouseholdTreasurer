@@ -7,6 +7,9 @@ from copy import copy
 import datetime
 import redis
 import pickle
+from dataclasses import dataclass
+
+
 
 ACCOUNT_QUESTION=-1
 ACCOUNT_NAME=0
@@ -38,6 +41,8 @@ class Cost:
     def __str__(self) -> str:
         return f"{self.date}: ${self.value} - {self.text} by {self.owner}"
 
+server = redis.Redis("localhost",6379,0)
+
 
 class Household_redis_adapter:
     server = redis.Redis("localhost",6379,0)
@@ -50,8 +55,16 @@ class Household_redis_adapter:
     
     def delete (self):
         self.server.delete(self.key)
-    
-class Household(Household_redis_adapter):
+
+@dataclass
+class Household_Response:
+    status:bool
+    msg:str
+    data:object
+
+class Household():
+
+
     def __init__(self,key,name) -> None:
         self.name=name
         self.key = key
@@ -63,15 +76,13 @@ class Household(Household_redis_adapter):
         self.sheet = []
         self.prev_sheets = []
 
-        super().__init__()
-
     def get_balance_str(self):
         resp="Your household current balance is:\n\n"
         for name,value in self.balance.items():
             resp+=f"{name}: ${value}\n"
         
         resp += "----------------------"
-        return resp
+        return Household_Response(True,"",resp)
     
     def get_budget_str(self):
         resp="Your household budget is:\n\n"
@@ -79,46 +90,44 @@ class Household(Household_redis_adapter):
             resp+=f"{name}: ${value}\n"
         
         resp += "----------------------"
-        return resp
+        return Household_Response(True,"",resp)
 
     def add_budget(self,name,cap):
         if name not in self.budget:
             self.budget[name]= int(cap)
             self.balance[name] = int(cap)
-            self.update()
-            return True, "budget is added"
+            return Household_Response(True,"budget is added",None)
         else:
-            return False,"budget already exist"
+            return Household_Response(False,"budget already exist",None)
 
     def remove_budget(self,name):
         if name not in self.budget:
-            return False, "budget does not exist"
+            return Household_Response( False, "budget does not exist",None)
         else:
             del self.budget[name]
             del self.balance[name]
-            self.update()
-            return True,"budget got deleted successfully"
+            return Household_Response( True,"budget got deleted successfully",None)
 
     def reset_budget(self):
         self.balance = copy(self.budget)
-        self.update()
+        return Household_Response( True,"budget got restarted",None)
 
     def add_cost(self,name,cost:int,user=None,date=None,text=None):
         if name in self.budget:
             self.sheet.append( Cost(cost,name,text,date,user))
             self.balance[name]-=cost
             self.update()
-            return True, "cost is registred"
+            return Household_Response(  True, "cost is registred",None)
         else:
-            return False, "budget does not exist"
+            return Household_Response( False, "budget does not exist",None)
         
     def get_budget_categories(self):
-        return self.budget.keys()
+        return Household_Response( True, "",self.budget.keys())
     
     def finish_cycle(self):
         self.balance_prev.append((datetime.datetime.now(),copy(self.balance)))
         self.balance = copy(self.budget)
-        self.update()
+        return Household_Response( True, "Cycle is finsihed",None)
 
     def get_costs(self,page=0):
         resp = []
@@ -126,17 +135,17 @@ class Household(Household_redis_adapter):
         for i in range(10*page,10*page+1):
             resp.append((i, str(self.sheet[i])))
 
-        return resp
-    
+        return Household_Response( True, "",resp)
+
     def remove_costs(self,i):
         try:
             cost:Cost = self.sheet[i]
             self.balance[cost.category] += cost.value # revet back the cost 
             del self.sheet[i]
-            self.update()
-            return True
+            return Household_Response( True, "",None)
         except:
-            return False
+            return Household_Response( False, "",None)
+
     
 
 
